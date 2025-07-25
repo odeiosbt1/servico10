@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, Dimensions, Text, TouchableOpacity, Image, Alert, Platform } from 'react-native';
+import { View, StyleSheet, Dimensions, Text, TouchableOpacity, Image, Alert, Platform, ActivityIndicator } from 'react-native';
 import { Provider } from '@/types';
 import { getCurrentLocation } from '@/services/location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '@/contexts/AuthContext';
 import { createOrGetChat } from '@/services/chat';
 import { router } from 'expo-router';
-import { MapPin } from 'lucide-react-native';
+import { MapPin, Navigation } from 'lucide-react-native';
+import { SkeletonLoader, MapSkeleton } from '@/components/SkeletonLoader';
+import Toast from 'react-native-toast-message';
 
 // Only import react-native-maps on native platforms
 let RNMapView: any = null;
@@ -28,18 +30,23 @@ interface MapViewProps {
   providers: Provider[];
   onProviderSelect?: (provider: Provider) => void;
   userLocation?: { latitude: number; longitude: number } | null;
+  loading?: boolean;
 }
 
 const { width, height } = Dimensions.get('window');
 
 // Web-compatible map component
-const WebMapComponent: React.FC<MapViewProps> = ({ providers, onProviderSelect }) => {
+const WebMapComponent: React.FC<MapViewProps> = ({ providers, onProviderSelect, loading = false }) => {
   const { user, userProfile } = useAuth();
   const [selectedProvider, setSelectedProvider] = useState<Provider | null>(null);
+  const [mapLoading, setMapLoading] = useState(true);
 
   const handleProviderPress = (provider: Provider) => {
     setSelectedProvider(provider);
     onProviderSelect?.(provider);
+    
+    // Navigate to provider profile
+    router.push(`/provider/${provider.uid}`);
   };
 
   const handleStartChat = async (provider: Provider) => {
@@ -66,24 +73,44 @@ const WebMapComponent: React.FC<MapViewProps> = ({ providers, onProviderSelect }
       router.push(`/chat/${chatId}`);
     } catch (error) {
       console.error('Error starting chat:', error);
-      Alert.alert('Erro', 'Falha ao iniciar conversa. Tente novamente.');
+      Toast.show({
+        type: 'error',
+        text1: 'Erro',
+        text2: 'Falha ao iniciar conversa'
+      });
     }
   };
+
+  useEffect(() => {
+    // Simulate map loading
+    const timer = setTimeout(() => {
+      setMapLoading(false);
+    }, 1500);
+    
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (loading || mapLoading) {
+    return <MapSkeleton />;
+  }
 
   return (
     <View style={styles.container}>
       {/* Web Map Placeholder */}
       <View style={styles.webMapContainer}>
         <Image
-          source={{ uri: 'https://images.pexels.com/photos/1252814/pexels-photo-1252814.jpeg?auto=compress&cs=tinysrgb&w=800&h=400&fit=crop' }}
+          source={{ uri: 'https://images.pexels.com/photos/2422915/pexels-photo-2422915.jpeg?auto=compress&cs=tinysrgb&w=800&h=400&fit=crop' }}
           style={styles.webMapImage}
         />
         <View style={styles.webMapOverlay}>
-          <MapPin size={32} color="#2563eb" />
+          <Navigation size={32} color="white" />
           <Text style={styles.webMapTitle}>Mapa de Prestadores</Text>
           <Text style={styles.webMapSubtitle}>
             {providers.length} prestadores encontrados na região
           </Text>
+          <TouchableOpacity style={styles.webMapButton}>
+            <Text style={styles.webMapButtonText}>Ver no Mapa Completo</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -151,10 +178,11 @@ const WebMapComponent: React.FC<MapViewProps> = ({ providers, onProviderSelect }
 };
 
 // Native map component
-const NativeMapComponent: React.FC<MapViewProps> = ({ providers, onProviderSelect, userLocation }) => {
+const NativeMapComponent: React.FC<MapViewProps> = ({ providers, onProviderSelect, userLocation, loading = false }) => {
   const { user, userProfile } = useAuth();
   const [searchRadius, setSearchRadius] = useState<number>(5);
   const [selectedProvider, setSelectedProvider] = useState<Provider | null>(null);
+  const [mapReady, setMapReady] = useState(false);
 
   useEffect(() => {
     loadSearchRadius();
@@ -174,6 +202,11 @@ const NativeMapComponent: React.FC<MapViewProps> = ({ providers, onProviderSelec
   const handleMarkerPress = (provider: Provider) => {
     setSelectedProvider(provider);
     onProviderSelect?.(provider);
+    
+    // Navigate to provider profile after a short delay
+    setTimeout(() => {
+      router.push(`/provider/${provider.uid}`);
+    }, 500);
   };
 
   const handleStartChat = async (provider: Provider) => {
@@ -200,7 +233,11 @@ const NativeMapComponent: React.FC<MapViewProps> = ({ providers, onProviderSelec
       router.push(`/chat/${chatId}`);
     } catch (error) {
       console.error('Error starting chat:', error);
-      Alert.alert('Erro', 'Falha ao iniciar conversa. Tente novamente.');
+      Toast.show({
+        type: 'error',
+        text1: 'Erro',
+        text2: 'Falha ao iniciar conversa'
+      });
     }
   };
 
@@ -212,11 +249,21 @@ const NativeMapComponent: React.FC<MapViewProps> = ({ providers, onProviderSelec
   };
 
   if (!RNMapView) {
-    return <WebMapComponent providers={providers} onProviderSelect={onProviderSelect} />;
+    return <WebMapComponent providers={providers} onProviderSelect={onProviderSelect} loading={loading} />;
+  }
+
+  if (loading) {
+    return <MapSkeleton />;
   }
 
   return (
     <View style={styles.container}>
+      {!mapReady && (
+        <View style={styles.mapLoadingOverlay}>
+          <ActivityIndicator size="large" color="#2563eb" />
+          <Text style={styles.mapLoadingText}>Carregando mapa...</Text>
+        </View>
+      )}
       <RNMapView
         provider={PROVIDER_GOOGLE}
         style={styles.map}
@@ -230,6 +277,7 @@ const NativeMapComponent: React.FC<MapViewProps> = ({ providers, onProviderSelec
         showsIndoors={true}
         loadingEnabled={true}
         mapType="standard"
+        onMapReady={() => setMapReady(true)}
       >
         {providers.map((provider) => (
           <Marker
@@ -332,9 +380,10 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(37, 99, 235, 0.8)',
+    backgroundColor: 'rgba(37, 99, 235, 0.9)',
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 20,
   },
   webMapTitle: {
     fontSize: 20,
@@ -342,11 +391,26 @@ const styles = StyleSheet.create({
     color: 'white',
     marginTop: 8,
     marginBottom: 4,
+    textAlign: 'center',
   },
   webMapSubtitle: {
     fontSize: 14,
     color: 'rgba(255, 255, 255, 0.9)',
     textAlign: 'center',
+    marginBottom: 16,
+  },
+  webMapButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  webMapButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
   },
   webProvidersList: {
     position: 'absolute',
@@ -504,6 +568,23 @@ const styles = StyleSheet.create({
   mapInfoText: {
     fontSize: 12,
     color: '#1e293b',
+    fontWeight: '600',
+  },
+  mapLoadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  mapLoadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#2563eb',
     fontWeight: '600',
   },
 });

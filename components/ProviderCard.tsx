@@ -13,6 +13,7 @@ interface ProviderCardProps {
   onChatPress?: () => void;
   showDistance?: boolean;
   showChatButton?: boolean;
+  showReviewButton?: boolean;
 }
 
 export const ProviderCard: React.FC<ProviderCardProps> = ({ 
@@ -20,9 +21,11 @@ export const ProviderCard: React.FC<ProviderCardProps> = ({
   onPress, 
   onChatPress,
   showDistance = true,
-  showChatButton = true
+  showChatButton = true,
+  showReviewButton = false
 }) => {
   const { user, userProfile } = useAuth();
+  const [showReviewModal, setShowReviewModal] = useState(false);
 
   const renderStars = (rating: number) => {
     const stars = [];
@@ -71,10 +74,22 @@ export const ProviderCard: React.FC<ProviderCardProps> = ({
       router.push(`/chat/${chatId}`);
     } catch (error) {
       console.error('Error starting chat:', error);
-      Alert.alert('Erro', 'Falha ao iniciar conversa. Tente novamente.');
+      Toast.show({
+        type: 'error',
+        text1: 'Erro',
+        text2: 'Falha ao iniciar conversa'
+      });
     }
   };
 
+  const handleReviewSubmitted = () => {
+    setShowReviewModal(false);
+    Toast.show({
+      type: 'success',
+      text1: 'Sucesso',
+      text2: 'Avaliação enviada com sucesso!'
+    });
+  };
   return (
     <TouchableOpacity style={styles.card} onPress={onPress}>
       <View style={styles.header}>
@@ -114,17 +129,40 @@ export const ProviderCard: React.FC<ProviderCardProps> = ({
           <Text style={styles.distance}>{provider.distance}km de distância</Text>
         )}
         
-        {showChatButton && (
-          <TouchableOpacity 
-            style={styles.chatButton} 
-            onPress={onChatPress || handleStartChat}
-          >
-            <MessageCircle size={16} color="white" />
-            <Text style={styles.chatButtonText}>Conversar</Text>
-          </TouchableOpacity>
-        )
-        }
+        <View style={styles.actionButtons}>
+          {showReviewButton && user && userProfile?.userType === 'contratante' && (
+            <TouchableOpacity 
+              style={styles.reviewButton} 
+              onPress={() => setShowReviewModal(true)}
+            >
+              <Star size={14} color="#fbbf24" />
+              <Text style={styles.reviewButtonText}>Avaliar</Text>
+            </TouchableOpacity>
+          )}
+          
+          {showChatButton && (
+            <TouchableOpacity 
+              style={styles.chatButton} 
+              onPress={onChatPress || handleStartChat}
+            >
+              <MessageCircle size={16} color="white" />
+              <Text style={styles.chatButtonText}>Conversar</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
+      
+      {/* Review Modal */}
+      {showReviewButton && user && userProfile && (
+        <ReviewModal
+          visible={showReviewModal}
+          onClose={() => setShowReviewModal(false)}
+          provider={provider}
+          clientId={user.uid}
+          clientName={userProfile.displayName}
+          onReviewSubmitted={handleReviewSubmitted}
+        />
+      )}
     </TouchableOpacity>
   );
 };
@@ -191,12 +229,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   details: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    gap: 12,
   },
   rating: {
-    flex: 1,
+    marginBottom: 4,
   },
   stars: {
     flexDirection: 'row',
@@ -205,11 +241,31 @@ const styles = StyleSheet.create({
   ratingText: {
     fontSize: 12,
     color: '#64748b',
+    marginBottom: 8,
   },
   distance: {
     fontSize: 12,
     color: '#64748b',
     fontWeight: '500',
+    marginBottom: 8,
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  reviewButton: {
+    backgroundColor: '#fbbf24',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  reviewButtonText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 4,
   },
   chatButton: {
     backgroundColor: '#2563eb',
@@ -218,7 +274,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
-    marginLeft: 8,
   },
   chatButtonText: {
     color: 'white',

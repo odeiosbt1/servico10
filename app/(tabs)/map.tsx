@@ -1,16 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, Dimensions, ScrollView, Text, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, Dimensions, ScrollView, Text, TouchableOpacity, RefreshControl } from 'react-native';
 import { collection, query, where, getDocs } from 'firebase/firestore';
-import { Settings } from 'lucide-react-native';
+import { Settings, Search } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from '@/services/firebase';
 import { MapView } from '@/components/MapView';
 import { ProviderCard } from '@/components/ProviderCard';
+import { NotificationButton } from '@/components/NotificationButton';
+import { ProviderCardSkeleton } from '@/components/SkeletonLoader';
 import { Provider } from '@/types';
 import { calculateDistance, getCurrentLocation } from '@/services/location';
 import { createOrGetChat } from '@/services/chat';
 import { useAuth } from '@/contexts/AuthContext';
 import { router } from 'expo-router';
+import Toast from 'react-native-toast-message';
 
 const { height } = Dimensions.get('window');
 
@@ -20,6 +23,8 @@ export default function MapScreen() {
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [searchRadius, setSearchRadius] = useState<number>(5);
   const [selectedProvider, setSelectedProvider] = useState<Provider | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     getCurrentLocation().then(setUserLocation);
@@ -45,6 +50,7 @@ export default function MapScreen() {
 
   const loadProviders = async () => {
     try {
+      setLoading(true);
       const providersRef = collection(db, 'users');
       const q = query(
         providersRef,
@@ -100,11 +106,19 @@ export default function MapScreen() {
       setProviders(providersData);
     } catch (error) {
       console.error('Error loading providers:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Erro',
+        text2: 'Falha ao carregar prestadores'
+      });
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleProviderSelect = (provider: Provider) => {
     setSelectedProvider(provider);
+    router.push(`/provider/${provider.uid}`);
   };
 
   const handleStartChat = async (provider: Provider) => {
@@ -124,20 +138,36 @@ export default function MapScreen() {
       router.push(`/chat/${chatId}`);
     } catch (error) {
       console.error('Error starting chat:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Erro',
+        text2: 'Falha ao iniciar conversa'
+      });
     }
   };
 
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await getCurrentLocation().then(setUserLocation);
+    await loadProviders();
+    setRefreshing(false);
+  };
   return (
     <View style={styles.container}>
       {/* Header with Settings */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Mapa de Prestadores</Text>
-        <TouchableOpacity 
-          style={styles.settingsButton}
-          onPress={() => router.push('/settings')}
-        >
-          <Settings size={24} color="#2563eb" />
-        </TouchableOpacity>
+        <View style={styles.headerContent}>
+          <Text style={styles.headerTitle}>Mapa de Prestadores</Text>
+          <View style={styles.headerActions}>
+            <NotificationButton />
+            <TouchableOpacity 
+              style={styles.settingsButton}
+              onPress={() => router.push('/settings')}
+            >
+              <Settings size={24} color="#2563eb" />
+            </TouchableOpacity>
+          </View>
+        </View>
       </View>
 
       <View style={styles.mapContainer}>
@@ -145,6 +175,7 @@ export default function MapScreen() {
           providers={providers} 
           onProviderSelect={handleProviderSelect}
           userLocation={userLocation}
+          loading={loading}
         />
       </View>
       
@@ -152,23 +183,37 @@ export default function MapScreen() {
         <Text style={styles.providersTitle}>
           Prestadores próximos ({providers.length})
         </Text>
-        <ScrollView style={styles.providersList}>
-          {providers.map((provider) => (
-            <ProviderCard
-              key={provider.uid}
-              provider={provider}
-              onPress={() => handleProviderSelect(provider)}
-              showDistance={true}
-              showChatButton={true}
-              onChatPress={() => handleStartChat(provider)}
-            />
-          ))}
-          {providers.length === 0 && (
+        <ScrollView 
+          style={styles.providersList}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+        >
+          {loading ? (
+            // Show skeleton loaders while loading
+            Array.from({ length: 3 }).map((_, index) => (
+              <ProviderCardSkeleton key={index} />
+            ))
+          ) : (
+            providers.map((provider) => (
+              <ProviderCard
+                key={provider.uid}
+                provider={provider}
+                onPress={() => handleProviderSelect(provider)}
+                showDistance={true}
+                showChatButton={true}
+                onChatPress={() => handleStartChat(provider)}
+              />
+            ))
+          )}
+          
+          {!loading && providers.length === 0 && (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>
+              <Search size={48} color="#d1d5db" />
+              <Text style={styles.emptyTitle}>
                 Nenhum prestador encontrado em um raio de {searchRadius}km
               </Text>
-              <Text style={styles.emptySubtext}>
+              <Text style={styles.emptyText}>
                 Tente aumentar o raio de busca nas configurações
               </Text>
             </View>
@@ -185,15 +230,22 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8fafc',
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     backgroundColor: 'white',
     paddingTop: 60,
     paddingBottom: 16,
-    paddingHorizontal: 24,
     borderBottomWidth: 1,
     borderBottomColor: '#e2e8f0',
+  },
+  headerContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   headerTitle: {
     fontSize: 20,
@@ -229,13 +281,15 @@ const styles = StyleSheet.create({
     padding: 32,
     alignItems: 'center',
   },
-  emptyText: {
+  emptyTitle: {
     fontSize: 16,
     color: '#64748b',
     textAlign: 'center',
+    fontWeight: 'bold',
+    marginTop: 16,
     marginBottom: 8,
   },
-  emptySubtext: {
+  emptyText: {
     fontSize: 14,
     color: '#94a3b8',
     textAlign: 'center',

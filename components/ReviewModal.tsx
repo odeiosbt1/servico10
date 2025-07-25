@@ -10,9 +10,9 @@ import {
   Image
 } from 'react-native';
 import { X, Star } from 'lucide-react-native';
-import StarRating from 'react-native-star-rating-widget';
 import { addReview } from '@/services/reviews';
 import { Provider } from '@/types';
+import Toast from 'react-native-toast-message';
 
 interface ReviewModalProps {
   visible: boolean;
@@ -51,16 +51,21 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
     try {
       await addReview(provider.uid, clientId, clientName, rating, comment.trim());
       
-      Alert.alert(
-        'Sucesso',
-        'Avaliação enviada com sucesso!',
-        [{ text: 'OK', onPress: handleClose }]
-      );
+      Toast.show({
+        type: 'success',
+        text1: 'Sucesso',
+        text2: 'Avaliação enviada com sucesso!'
+      });
       
       onReviewSubmitted?.();
+      handleClose();
     } catch (error) {
       console.error('Error submitting review:', error);
-      Alert.alert('Erro', 'Falha ao enviar avaliação. Tente novamente.');
+      Toast.show({
+        type: 'error',
+        text1: 'Erro',
+        text2: 'Falha ao enviar avaliação'
+      });
     } finally {
       setLoading(false);
     }
@@ -72,6 +77,25 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
     onClose();
   };
 
+  const renderStars = () => {
+    const stars = [];
+    for (let i = 1; i <= 5; i++) {
+      stars.push(
+        <TouchableOpacity
+          key={i}
+          onPress={() => setRating(i)}
+          style={styles.starButton}
+        >
+          <Star
+            size={40}
+            color={i <= rating ? '#fbbf24' : '#d1d5db'}
+            fill={i <= rating ? '#fbbf24' : 'transparent'}
+          />
+        </TouchableOpacity>
+      );
+    }
+    return stars;
+  };
   return (
     <Modal
       visible={visible}
@@ -103,13 +127,9 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
 
           <View style={styles.ratingSection}>
             <Text style={styles.ratingLabel}>Como foi o serviço?</Text>
-            <StarRating
-              rating={rating}
-              onChange={setRating}
-              starSize={40}
-              color="#fbbf24"
-              starStyle={styles.star}
-            />
+            <View style={styles.starsContainer}>
+              {renderStars()}
+            </View>
             <Text style={styles.ratingText}>
               {rating === 0 && 'Toque nas estrelas para avaliar'}
               {rating === 1 && 'Muito ruim'}
@@ -224,8 +244,13 @@ const styles = StyleSheet.create({
     color: '#1e293b',
     marginBottom: 16,
   },
-  star: {
-    marginHorizontal: 2,
+  starsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  starButton: {
+    padding: 4,
   },
   ratingText: {
     fontSize: 14,

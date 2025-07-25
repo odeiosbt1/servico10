@@ -1,15 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, RefreshControl, Text } from 'react-native';
+import { View, StyleSheet, ScrollView, RefreshControl, Text, TouchableOpacity } from 'react-native';
 import { collection, query, where, getDocs, limit } from 'firebase/firestore';
-import { Search, MapPin, Users, Star } from 'lucide-react-native';
+import { Search, MapPin, Users, Star, Bell } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from '@/services/firebase';
 import { MapView } from '@/components/MapView';
 import { SearchFilters } from '@/components/SearchFilters';
 import { ProviderCard } from '@/components/ProviderCard';
+import { NotificationButton } from '@/components/NotificationButton';
+import { ProviderCardSkeleton } from '@/components/SkeletonLoader';
 import { Provider } from '@/types';
 import { calculateDistance, getCurrentLocation } from '@/services/location';
 import { useAuth } from '@/contexts/AuthContext';
+import { createOrGetChat } from '@/services/chat';
+import { router } from 'expo-router';
+import Toast from 'react-native-toast-message';
 
 export default function HomeScreen() {
   const { user } = useAuth();
@@ -21,6 +26,7 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [searchRadius, setSearchRadius] = useState<number>(5);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     getCurrentLocation().then(setUserLocation);
@@ -45,6 +51,7 @@ export default function HomeScreen() {
 
   const loadProviders = async () => {
     try {
+      setLoading(true);
       const providersRef = collection(db, 'users');
       const q = query(
         providersRef,
@@ -96,6 +103,13 @@ export default function HomeScreen() {
       setProviders(providersData);
     } catch (error) {
       console.error('Error loading providers:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Erro',
+        text2: 'Falha ao carregar prestadores'
+      });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -134,21 +148,51 @@ export default function HomeScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
+    await getCurrentLocation().then(setUserLocation);
     await loadProviders();
     setRefreshing(false);
   };
 
   const handleProviderPress = (provider: Provider) => {
-    // Navigate to provider details or chat
-    console.log('Provider selected:', provider.displayName);
+    router.push(`/provider/${provider.uid}`);
+  };
+
+  const handleStartChat = async (provider: Provider) => {
+    if (!user || !userProfile) {
+      router.push('/auth');
+      return;
+    }
+
+    try {
+      const chatId = await createOrGetChat(
+        user.uid,
+        provider.uid,
+        userProfile.displayName,
+        provider.displayName
+      );
+      
+      router.push(`/chat/${chatId}`);
+    } catch (error) {
+      console.error('Error starting chat:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Erro',
+        text2: 'Falha ao iniciar conversa'
+      });
+    }
   };
 
   return (
     <View style={styles.container}>
       {/* App Header */}
       <View style={styles.header}>
-        <Text style={styles.appTitle}>Serviço Fácil</Text>
-        <Text style={styles.appSubtitle}>Encontre prestadores</Text>
+        <View style={styles.headerContent}>
+          <View style={styles.headerLeft}>
+            <Text style={styles.appTitle}>Serviço Fácil</Text>
+            <Text style={styles.appSubtitle}>Encontre prestadores</Text>
+          </View>
+          <NotificationButton />
+        </View>
         
         {/* Quick Stats */}
         <View style={styles.statsContainer}>
@@ -179,7 +223,12 @@ export default function HomeScreen() {
         }
       >
         {/* Map Section */}
-        <MapView providers={filteredProviders} onProviderSelect={handleProviderPress} />
+        <MapView 
+          providers={filteredProviders} 
+          onProviderSelect={handleProviderPress}
+          userLocation={userLocation}
+          loading={loading}
+        />
         
         {/* Search and Filters */}
         <SearchFilters
@@ -197,41 +246,37 @@ export default function HomeScreen() {
 
         {/* Providers List */}
         <View style={styles.providersList}>
-          {filteredProviders.map((provider) => (
-            <ProviderCard
-              key={provider.uid}
-              provider={provider}
-              onPress={() => handleProviderPress(provider)}
-              showDistance={true}
-              showChatButton={true}
-              onChatPress={() => handleStartChat(provider)}
-              showReviewButton={true}
-            />
-          ))}
+          {loading ? (
+            // Show skeleton loaders while loading
+            Array.from({ length: 3 }).map((_, index) => (
+              <ProviderCardSkeleton key={index} />
+            ))
+          ) : (
+            filteredProviders.map((provider) => (
+              <ProviderCard
+                key={provider.uid}
+                provider={provider}
+                onPress={() => handleProviderPress(provider)}
+                showDistance={true}
+                showChatButton={true}
+                onChatPress={() => handleStartChat(provider)}
+              />
+            ))
+          )}
+          
+          {!loading && filteredProviders.length === 0 && (
+            <View style={styles.emptyState}>
+              <Search size={48} color="#d1d5db" />
+              <Text style={styles.emptyTitle}>Nenhum prestador encontrado</Text>
+              <Text style={styles.emptyText}>
+                Tente ajustar os filtros ou aumentar o raio de busca
+              </Text>
+            </View>
+          )}
         </View>
       </ScrollView>
     </View>
   );
-
-  const handleStartChat = async (provider: Provider) => {
-    if (!user) {
-      router.push('/auth');
-      return;
-    }
-
-    try {
-      const chatId = await createOrGetChat(
-        user.uid,
-        provider.uid,
-        user.displayName || 'Usuário',
-        provider.displayName
-      );
-      
-      router.push(`/chat/${chatId}`);
-    } catch (error) {
-      console.error('Error starting chat:', error);
-    }
-  };
 }
 
 const styles = StyleSheet.create({
@@ -243,7 +288,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'white',
     paddingTop: 60,
     paddingBottom: 20,
-    paddingHorizontal: 24,
     borderBottomWidth: 1,
     borderBottomColor: '#e2e8f0',
     shadowColor: '#000',
@@ -252,18 +296,25 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
+  headerContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingHorizontal: 24,
+    marginBottom: 20,
+  },
+  headerLeft: {
+    flex: 1,
+  },
   appTitle: {
     fontSize: 32,
     fontWeight: 'bold',
     color: '#2563eb',
-    textAlign: 'center',
     marginBottom: 4,
   },
   appSubtitle: {
     fontSize: 16,
     color: '#64748b',
-    textAlign: 'center',
-    marginBottom: 20,
   },
   statsContainer: {
     flexDirection: 'row',
@@ -273,6 +324,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingVertical: 16,
     paddingHorizontal: 12,
+    marginHorizontal: 24,
   },
   statItem: {
     alignItems: 'center',
@@ -301,5 +353,23 @@ const styles = StyleSheet.create({
   },
   providersList: {
     paddingBottom: 20,
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 40,
+    paddingHorizontal: 32,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#64748b',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptyText: {
+    fontSize: 14,
+    color: '#94a3b8',
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });
